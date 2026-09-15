@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alt-data-feature-pipeline"
+version = "0.1.0"
+description = "Point-in-time ingestion and feature engineering for alternative equity datasets: SEC EDGAR Form 4 insider transactions and Cboe/FINRA short interest."
+requires-python = ">=3.9"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.23",
+    "requests>=2.32",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
