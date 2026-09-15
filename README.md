@@ -15,7 +15,7 @@ alone.
 | Module | Status |
 |---|---|
 | SEC EDGAR Form 4 ingestion | done |
-| Cboe/FINRA short interest ingestion | not started |
+| Cboe/FINRA short interest ingestion | done |
 | Point-in-time alignment (as-of joins) | not started |
 | Feature engineering | not started |
 | Merged panel | not started |
@@ -53,4 +53,33 @@ mocked response):
 
 ```bash
 pytest tests/
+```
+
+## Cboe/FINRA short interest ingestion
+
+`src/alt_data_pipeline/ingestion/cboe_short_interest.py`
+
+Short interest — how many shares are currently sold short, i.e. how much
+the market is betting a stock will fall — is published bi-monthly. Every
+report carries two dates: a *settlement* date (when the count actually
+happened) and a *publication* date (when the public could first see it).
+Confirmed real gap: an 11-day lag, every cycle. A pipeline that merges on
+settlement date is pretending the market knew a number before it was
+actually published.
+
+```python
+from alt_data_pipeline.ingestion import get_short_interest
+
+report = get_short_interest("20260911")  # publication date, not settlement date
+```
+
+`short_interest_pct_change` is computed here directly from the raw
+current/previous share counts, not taken from Cboe's own pre-computed
+column — `reported_pct_change` is kept alongside it purely as an
+independent cross-check (they agree to within Cboe's own rounding).
+
+Run the real-data demo:
+
+```bash
+python scripts/demo_cboe_short_interest.py
 ```
