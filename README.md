@@ -16,7 +16,7 @@ alone.
 |---|---|
 | SEC EDGAR Form 4 ingestion | done |
 | Cboe/FINRA short interest ingestion | done |
-| Point-in-time alignment (as-of joins) | not started |
+| Point-in-time alignment (as-of joins) | done |
 | Feature engineering | not started |
 | Merged panel | not started |
 
@@ -82,4 +82,38 @@ Run the real-data demo:
 
 ```bash
 python scripts/demo_cboe_short_interest.py
+```
+
+## Point-in-time alignment (as-of joins)
+
+`src/alt_data_pipeline/alignment/`
+
+A filing dated Saturday doesn't become actionable on Saturday — markets
+are closed. An exact-date merge against price data would silently drop
+that row entirely rather than erroring, hiding a systematic pattern:
+weekend-adjacent events vanish from the dataset every time, unnoticed.
+The fix maps each event date to the *next available* trading day —
+forward only, never backward. A backward match would pair an event with a
+price from before the event was even public.
+
+`trading_calendar.get_trading_days` derives a real trading calendar
+directly from a real ticker's actual trade dates — confirmed real US
+holidays (July 4th, Christmas, Thanksgiving) come back correctly absent.
+`asof_join.align_to_next_trading_day` does the actual mapping.
+
+```python
+from alt_data_pipeline.alignment import align_to_next_trading_day, get_trading_days
+
+trading_days = get_trading_days("AAPL", start="2019-01-01", end="2024-12-31")
+df["trading_date"] = align_to_next_trading_day(df["filing_date"], trading_days)
+```
+
+Real finding: across 590 real Apple Form 4 filings, none landed on a
+weekend — EDGAR's Form 4 filing pattern is business-day-only in practice.
+Every filing inside the known calendar range aligns to itself.
+
+Run the real-data demo:
+
+```bash
+python scripts/demo_alignment.py
 ```
