@@ -19,7 +19,9 @@ alone.
 | Point-in-time alignment (as-of joins) | done |
 | Form 4 transaction detail | done |
 | Form 4 feature engineering (5 features) | done |
-| Short interest feature engineering (5 features) | not started |
+| FINRA comprehensive short interest ingestion | done |
+| Shares outstanding ingestion | done |
+| Short interest feature engineering (3 of 5 features) | done |
 | Merged panel | not started |
 
 ## SEC EDGAR Form 4 ingestion
@@ -57,33 +59,47 @@ mocked response):
 pytest tests/
 ```
 
-## Cboe/FINRA short interest ingestion
+## Short interest ingestion
 
-`src/alt_data_pipeline/ingestion/cboe_short_interest.py`
+`src/alt_data_pipeline/ingestion/cboe_short_interest.py` and
+`finra_short_interest.py`
 
 Short interest — how many shares are currently sold short, i.e. how much
 the market is betting a stock will fall — is published bi-monthly. Every
 report carries two dates: a *settlement* date (when the count actually
 happened) and a *publication* date (when the public could first see it).
-Confirmed real gap: an 11-day lag, every cycle. A pipeline that merges on
-settlement date is pretending the market knew a number before it was
-actually published.
+Merging on settlement date is pretending the market knew a number before
+it was actually published.
+
+Two real sources here, deliberately — not redundant, genuinely different
+coverage, found by checking rather than assuming one file was enough:
+
+- **Cboe** (`get_short_interest`) covers securities where Cboe/BATS is the
+  *primary listing exchange* — confirmed real gap: 11 days. It does not
+  include Apple, Tesla, or most Nasdaq/NYSE megacaps at all.
+- **FINRA** (`get_short_interest_finra`) is comprehensive — every exchange
+  in one file, confirmed real gap: 14 days, read from the response's own
+  `Last-Modified` header rather than assumed equal to the settlement date
+  in the filename.
 
 ```python
-from alt_data_pipeline.ingestion import get_short_interest
+from alt_data_pipeline.ingestion import get_short_interest, get_short_interest_finra
 
-report = get_short_interest("20260911")  # publication date, not settlement date
+cboe_report = get_short_interest("20260911")          # Cboe/BATS-listed only
+finra_report = get_short_interest_finra("20260831")    # all exchanges, incl. AAPL/TSLA
 ```
 
-`short_interest_pct_change` is computed here directly from the raw
-current/previous share counts, not taken from Cboe's own pre-computed
-column — `reported_pct_change` is kept alongside it purely as an
-independent cross-check (they agree to within Cboe's own rounding).
+In both, `short_interest_pct_change` is computed directly from the raw
+current/previous share counts, not taken from the source's own
+pre-computed column — `reported_pct_change` is kept alongside purely as
+an independent cross-check (they agree to within the source's own
+rounding).
 
-Run the real-data demo:
+Run the real-data demos:
 
 ```bash
 python scripts/demo_cboe_short_interest.py
+python scripts/demo_short_interest_features.py
 ```
 
 ## Point-in-time alignment (as-of joins)
@@ -113,6 +129,26 @@ df["trading_date"] = align_to_next_trading_day(df["filing_date"], trading_days)
 Real finding: across 590 real Apple Form 4 filings, none landed on a
 weekend — EDGAR's Form 4 filing pattern is business-day-only in practice.
 Every filing inside the known calendar range aligns to itself.
+
+**The mirror-image case.** `latest_known_value_asof` searches *backward*:
+for a slowly-changing quantity like shares outstanding, the correct value
+as of a given date is the most recently *published* one — never a later
+one that didn't exist yet. Forward would be the look-ahead bias here,
+not the fix. Same discipline as the forward case (never let the future
+leak into a point-in-time value), opposite direction, because the two
+questions are genuinely different: "when can I first act on this event"
+vs. "what was the most recently known value of this slowly-changing
+number."
+
+```python
+from alt_data_pipeline.alignment import latest_known_value_asof
+from alt_data_pipeline.ingestion import get_shares_outstanding
+
+shares = get_shares_outstanding("0000320193")
+as_of_publication = latest_known_value_asof(
+    short_interest["publication_date"], shares["filed_date"], shares["shares_outstanding"]
+)
+```
 
 Run the real-data demo:
 
@@ -203,4 +239,50 @@ Run the real-data demo:
 
 ```bash
 python scripts/demo_form4_features.py
+```
+
+## Short interest feature engineering
+
+`src/alt_data_pipeline/features/short_interest_features.py`
+
+Three of the five short-interest features, so far:
+
+1. **Percent change in short interest** and **2. days-to-cover** were
+   already sitting in the ingestion data — passed through here under
+   clear feature names, no new work needed.
+2. **Percent of float** — raw share counts distort by company size. A
+   small company's short interest jumping from 100k to 200k shares looks
+   like a 100% increase; a giant's 40M-to-42M jump is "only" 5%, even
+   when it represents a comparably large real bet. Normalizing by shares
+   outstanding corrects that. Built using the backward as-of lookup
+   above, matched to shares outstanding known *as of* the short-interest
+   publication date.
+
+Real result, four real megacaps, same real settlement cycle:
+
+| Symbol | % of float |
+|---|---|
+| AAPL | 0.958% |
+| TSLA | 1.879% |
+| NVDA | 1.238% |
+| MSFT | 1.003% |
+
+```python
+from alt_data_pipeline.features import engineer_short_interest_features
+from alt_data_pipeline.ingestion import get_shares_outstanding, get_short_interest_finra
+
+short_interest = get_short_interest_finra("20260831")
+aapl = short_interest[short_interest["symbol"] == "AAPL"]
+shares = get_shares_outstanding("0000320193")
+features = engineer_short_interest_features(aapl, shares)
+```
+
+Deviation from own baseline and sector divergence — the remaining two —
+need a symbol's short-interest history across multiple real reporting
+cycles and a peer/sector grouping, respectively. Not yet built.
+
+Run the real-data demo:
+
+```bash
+python scripts/demo_short_interest_features.py
 ```

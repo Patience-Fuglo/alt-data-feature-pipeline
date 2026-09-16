@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from alt_data_pipeline.alignment import align_to_next_trading_day, get_trading_days
+from alt_data_pipeline.alignment import align_to_next_trading_day, get_trading_days, latest_known_value_asof
 
 
 @pytest.fixture(scope="module")
@@ -80,3 +80,64 @@ def test_real_apple_form4_filings_land_on_trading_days_within_the_calendar(real_
     aligned = align_to_next_trading_day(in_range["filing_date"], real_trading_days)
     assert not aligned.isna().any()
     assert (aligned.values == in_range["filing_date"].values).all()
+
+
+# ---- latest_known_value_asof: the mirror-image, backward-searching case ---
+
+
+def _known_series():
+    known_dates = pd.DatetimeIndex(["2024-01-01", "2024-04-01", "2024-07-01"])
+    values = pd.Series([100, 200, 300])
+    return known_dates, values
+
+
+def test_exact_match_on_known_date_uses_that_dates_value():
+    known_dates, values = _known_series()
+    result = latest_known_value_asof(pd.Series([pd.Timestamp("2024-04-01")]), known_dates, values)
+    assert result.iloc[0] == 200
+
+
+def test_between_two_known_dates_uses_the_earlier_one_not_the_later():
+    # this is the actual look-ahead-bias guard: 2024-05-15 is between the
+    # April and July values -- it must use April's (100 -> 200 already
+    # known by April), never peek forward to July's 300.
+    known_dates, values = _known_series()
+    result = latest_known_value_asof(pd.Series([pd.Timestamp("2024-05-15")]), known_dates, values)
+    assert result.iloc[0] == 200
+
+
+def test_before_any_known_date_returns_nan():
+    known_dates, values = _known_series()
+    result = latest_known_value_asof(pd.Series([pd.Timestamp("2023-01-01")]), known_dates, values)
+    assert pd.isna(result.iloc[0])
+
+
+def test_after_last_known_date_uses_the_latest_value_not_nan():
+    # unlike align_to_next_trading_day (which returns NaT past its known
+    # range, since a *future* trading day genuinely isn't knowable yet),
+    # a slowly-changing value like shares outstanding is presumed to still
+    # hold until a newer figure is published -- the latest known value is
+    # the correct real-world answer, not "unknown."
+    known_dates, values = _known_series()
+    result = latest_known_value_asof(pd.Series([pd.Timestamp("2024-12-31")]), known_dates, values)
+    assert result.iloc[0] == 300
+
+
+def test_preserves_event_dates_index():
+    known_dates, values = _known_series()
+    events = pd.Series([pd.Timestamp("2024-04-01"), pd.Timestamp("2024-08-01")], index=[7, 3])
+    result = latest_known_value_asof(events, known_dates, values)
+    assert list(result.index) == [7, 3]
+
+
+def test_real_apple_shares_outstanding_lookup_matches_verified_value():
+    from alt_data_pipeline.ingestion.edgar_shares_outstanding import get_shares_outstanding
+
+    shares = get_shares_outstanding("0000320193")
+    # verified 2026-09-15: as of the 2026-09-11 short-interest publication
+    # date, the most recently filed real figure was 14,594,180,000 (filed
+    # 2026-07-31), not the newer or older ones on either side of it.
+    result = latest_known_value_asof(
+        pd.Series([pd.Timestamp("2026-09-11")]), shares["filed_date"], shares["shares_outstanding"]
+    )
+    assert result.iloc[0] == 14_594_180_000
