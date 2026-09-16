@@ -18,7 +18,8 @@ alone.
 | Cboe/FINRA short interest ingestion | done |
 | Point-in-time alignment (as-of joins) | done |
 | Form 4 transaction detail | done |
-| Feature engineering | not started |
+| Form 4 feature engineering (5 features) | done |
+| Short interest feature engineering (5 features) | not started |
 | Merged panel | not started |
 
 ## SEC EDGAR Form 4 ingestion
@@ -153,4 +154,53 @@ by one CEO in a single day):
 
 ```bash
 python scripts/demo_edgar_form4_detail.py
+```
+
+## Form 4 feature engineering
+
+`src/alt_data_pipeline/features/form4_features.py`
+
+Five features, each a proxy for how much genuine conviction — not routine
+paperwork — sits behind an insider's purchase:
+
+1. **Purchase size** — dollars committed, a proxy for conviction strength.
+2. **Insider role/seniority** — an officer sees day-to-day operations; a
+   director typically only reviews periodic summaries.
+3. **Cluster buying** — how many *other* insiders independently bought in
+   the same window. Harder to explain away as one person's opinion.
+4. **Purchase size vs. own history** — this purchase's size relative to
+   that same insider's own past average. A spike above someone's personal
+   normal is the signal, even if the raw dollar amount looks unremarkable
+   in isolation.
+5. **Days since that insider's own last purchase** — a routine buyer's
+   purchase carries little new information; a long silence broken by a
+   sudden purchase says more.
+
+Every feature is computed using only information strictly *before* the
+transaction it describes — an insider's own history feature only ever
+averages *prior* purchases, and cluster buying only ever looks *backward*
+from a given transaction. The same point-in-time discipline used
+everywhere else in this project (the purged walk-forward's embargo, the
+forward-only as-of join), applied here to feature engineering itself: a
+naive symmetric window or a mean over *all* of an insider's history
+(including the future relative to a given row) would quietly leak
+look-ahead bias into the feature itself.
+
+Real result: across Apple's entire observable filing history, only one
+insider has ever made a genuine open-market purchase. Tesla's history has
+6 distinct real buyers, including a real, verifiable cluster — Elon Musk
+and then-board-member Larry Ellison both bought on 2020-02-14.
+
+```python
+from alt_data_pipeline.features import engineer_form4_features
+from alt_data_pipeline.ingestion.edgar_form4_bulk import get_all_form4_transactions
+
+transactions = get_all_form4_transactions("0001318605", "Tesla Inc.")
+features = engineer_form4_features(transactions)
+```
+
+Run the real-data demo:
+
+```bash
+python scripts/demo_form4_features.py
 ```
