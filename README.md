@@ -21,7 +21,7 @@ alone.
 | Form 4 feature engineering (5 features) | done |
 | FINRA comprehensive short interest ingestion | done |
 | Shares outstanding ingestion | done |
-| Short interest feature engineering (3 of 5 features) | done |
+| Short interest feature engineering (5 of 5 features) | done |
 | Merged panel | not started |
 
 ## SEC EDGAR Form 4 ingestion
@@ -277,12 +277,38 @@ shares = get_shares_outstanding("0000320193")
 features = engineer_short_interest_features(aapl, shares)
 ```
 
-Deviation from own baseline and sector divergence — the remaining two —
-need a symbol's short-interest history across multiple real reporting
-cycles and a peer/sector grouping, respectively. Not yet built.
+**4. Deviation from own baseline** and **5. sector divergence** — the
+final two, built next.
 
-Run the real-data demo:
+Deviation from own baseline needed real history: FINRA only links its 2
+most recent files on the catalog page, but older ones are still real and
+reachable at the same predictable URL pattern — 9 real cycles pulled,
+April through August 2026 (one date, 2026-05-30, correctly skipped: not
+a real settlement day). Same point-in-time rule as the Form 4 features:
+each cycle's baseline is the mean of strictly *earlier* cycles only.
+
+Sector divergence needed a genuine peer check, not an assumption. Real
+company sector data (SIC code) comes from the same EDGAR endpoint already
+used elsewhere. Checked 5 plausible "tech peer" candidates for Apple
+(Dell, HP, Alphabet, Microsoft, Cisco) against its real SIC code
+(3571, Electronic Computers) — only **Dell** shares the exact code.
+Real result: Apple's short interest rose +20.13% one cycle while its one
+verified peer rose only +3.07% — a +17.06 point divergence, i.e. this
+looks like a stock-specific move, not the whole sector shifting together.
+
+```python
+from alt_data_pipeline.features import engineer_short_interest_features, find_sector_peers, sector_divergence
+from alt_data_pipeline.ingestion import get_short_interest_history, get_shares_outstanding
+
+history = get_short_interest_history("AAPL", ["20260415", "20260430", ...])
+features = engineer_short_interest_features(history, get_shares_outstanding("0000320193"))
+
+peers = find_sector_peers("0000320193", candidate_ciks)
+```
+
+Run the real-data demos:
 
 ```bash
 python scripts/demo_short_interest_features.py
+python scripts/demo_short_interest_history_features.py
 ```
