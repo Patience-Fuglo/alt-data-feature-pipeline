@@ -3,11 +3,12 @@
 Pulls a company's filing history from EDGAR's submissions API and keeps
 only Form 4s -- the filing an insider (officer, director, or >10% owner)
 must submit within 1-2 business days of buying or selling their own
-company's stock. This module returns the filing *list* only (form, date,
-accession number); reading transaction-level detail (buy vs. sell, share
-count, the transaction code distinguishing a genuine open-market purchase
-from a routine option exercise or grant) requires fetching each filing's
-own document, which is a separate ingestion step.
+company's stock. This module returns the filing *list* (form, date,
+accession number, and the primary document filename needed to fetch each
+filing's own transaction detail); reading transaction-level detail (buy
+vs. sell, share count, the transaction code distinguishing a genuine
+open-market purchase from a routine option exercise or grant) is a
+separate step, in ``edgar_form4_detail.py``.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ _SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 # well-behaved caller apart from a flood of anonymous traffic.
 _HEADERS = {"User-Agent": "Patience Fuglo patfug3@gmail.com"}
 
-_RETURN_COLUMNS = ["form", "filing_date", "accession_number", "company"]
+_RETURN_COLUMNS = ["form", "filing_date", "accession_number", "primary_document", "company"]
 
 
 def _normalize_cik(cik: str) -> str:
@@ -44,9 +45,9 @@ def get_form4_filings(cik: str, company_name: str) -> pd.DataFrame:
     to 10 digits before the request.
 
     Returns a DataFrame with columns ``form, filing_date, accession_number,
-    company``, sorted by filing_date ascending. Only Form 4s are kept; all
-    other filing types (10-K, 10-Q, 8-K, etc.) returned by the API are
-    dropped.
+    primary_document, company``, sorted by filing_date ascending. Only
+    Form 4s are kept; all other filing types (10-K, 10-Q, 8-K, etc.)
+    returned by the API are dropped.
 
     Note: EDGAR's submissions endpoint returns only the ~1,000 most recent
     filings of any type in this response; a company with high filing
@@ -66,6 +67,7 @@ def get_form4_filings(cik: str, company_name: str) -> pd.DataFrame:
             "form": recent["form"],
             "filing_date": pd.to_datetime(recent["filingDate"]),
             "accession_number": recent["accessionNumber"],
+            "primary_document": recent["primaryDocument"],
         }
     )
     df["company"] = company_name

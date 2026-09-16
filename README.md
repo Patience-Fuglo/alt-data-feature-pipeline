@@ -17,6 +17,7 @@ alone.
 | SEC EDGAR Form 4 ingestion | done |
 | Cboe/FINRA short interest ingestion | done |
 | Point-in-time alignment (as-of joins) | done |
+| Form 4 transaction detail | done |
 | Feature engineering | not started |
 | Merged panel | not started |
 
@@ -116,4 +117,40 @@ Run the real-data demo:
 
 ```bash
 python scripts/demo_alignment.py
+```
+
+## Form 4 transaction detail
+
+`src/alt_data_pipeline/ingestion/edgar_form4_detail.py`
+
+The filing list alone can't answer the question that actually matters —
+was this a genuine open-market purchase with the insider's own money
+(transaction code P), or routine paperwork (a grant, an option exercise,
+a gift)? That requires each filing's own document. Two real issues,
+found by checking actual filings rather than assuming a single format:
+
+- The submissions API's `primaryDocument` field often points at an
+  XSLT-*rendered viewer* path that returns HTML, not the underlying XML —
+  the real document sits at the same accession folder under just the
+  base filename.
+- Different filing agents encode the same boolean fields differently —
+  one real filing used `"true"`/`"false"`, another used `"1"`/`"0"` for
+  the identical `isOfficer` field. Checking only one format silently
+  misread a real company's CEO as not an officer.
+
+```python
+from alt_data_pipeline.ingestion import get_form4_filings, get_form4_transactions
+
+filings = get_form4_filings("0000320193", "Apple Inc.")
+row = filings.iloc[-1]
+transactions = get_form4_transactions(
+    "0000320193", row["accession_number"], row["primary_document"]
+)
+```
+
+Run the real-data demo (a real, large filing — 25 open-market purchases
+by one CEO in a single day):
+
+```bash
+python scripts/demo_edgar_form4_detail.py
 ```

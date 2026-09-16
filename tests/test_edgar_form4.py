@@ -40,7 +40,14 @@ def test_normalize_cik_rejects_too_many_digits():
 def test_get_form4_filings_returns_real_form4_only():
     result = get_form4_filings(APPLE_CIK, "Apple Inc.")
 
-    assert list(result.columns) == ["form", "filing_date", "accession_number", "company"]
+    assert list(result.columns) == [
+        "form",
+        "filing_date",
+        "accession_number",
+        "primary_document",
+        "company",
+    ]
+    assert (result["primary_document"].str.len() > 0).all()
     assert len(result) > 0
     assert (result["form"] == "4").all()
     assert (result["company"] == "Apple Inc.").all()
