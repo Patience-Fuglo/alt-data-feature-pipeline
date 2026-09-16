@@ -22,6 +22,7 @@ alone.
 | FINRA comprehensive short interest ingestion | done |
 | Shares outstanding ingestion | done |
 | Short interest feature engineering (5 of 5 features) | done |
+| Merged point-in-time panel | done |
 | Merged panel | not started |
 
 ## SEC EDGAR Form 4 ingestion
@@ -312,3 +313,56 @@ Run the real-data demos:
 python scripts/demo_short_interest_features.py
 python scripts/demo_short_interest_history_features.py
 ```
+
+## Merged point-in-time panel
+
+`src/alt_data_pipeline/features/merged_panel.py`
+
+Form 4 events and short-interest reports each happen on their own sparse
+schedule, but a model needs a value every trading day. The fix isn't
+"fill with zero everywhere" — it's matching the fill strategy to what
+each feature actually represents:
+
+- An **ongoing-state** feature (purchase size, insider role, % of float,
+  deviation from baseline...) genuinely still holds until a newer
+  observation replaces it — forward-filled.
+- A **specific-day event flag** ("did a purchase happen today") genuinely
+  didn't happen on days with no purchase — zero-filled, never
+  forward-filled, or every day after one real purchase would falsely
+  claim a new one happened.
+
+Everything is placed on its real *actionable* trading date — via the same
+forward as-of alignment from earlier — not its raw event date.
+
+Rows before either dataset's first real observation are left `NaN`,
+deliberately. Forward-fill can't manufacture data that doesn't exist, and
+filling those leading rows with 0 would falsely claim "verified no
+activity" for a period with no data at all — a distinction real data
+forces that a synthetic panel starting from day one never has to make.
+
+```python
+from alt_data_pipeline.alignment import get_trading_days
+from alt_data_pipeline.features import build_merged_panel, engineer_form4_features, engineer_short_interest_features
+
+trading_days = get_trading_days("TSLA", start="2025-08-01", end="2026-09-15")
+panel = build_merged_panel(trading_days, form4_features, short_interest_features)
+```
+
+Real result: 281 real trading days, Tesla — the real 2025-09-12 Musk
+purchase (officer + director + >10% owner, role score 4) forward-fills
+correctly all the way to the most recent trading day, while short
+interest carries its own independent forward-fill on its own bi-monthly
+schedule, right up until each new real cycle supersedes it.
+
+Run the real-data demo:
+
+```bash
+python scripts/demo_merged_panel.py
+```
+
+---
+
+This closes out `alt-data-feature-pipeline`: real ingestion, point-in-time
+alignment (both directions), transaction-detail parsing, all ten features
+across both datasets, and the merged panel. Next: `alt-data-alpha-signal`,
+the flagship signal built on top of this panel.
