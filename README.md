@@ -96,6 +96,18 @@ pre-computed column — `reported_pct_change` is kept alongside purely as
 an independent cross-check (they agree to within the source's own
 rounding).
 
+**A second real finding, caught later by testing an older file rather
+than trusting the recent-file pattern:** FINRA bulk-migrated its archive
+to this CDN on 2023-07-27, and every pre-migration file's `Last-Modified`
+header reflects that migration date, not its real original publication
+date — three independent 2018-2020 files, checked directly, all shared
+that exact same timestamp to the second. Using it as "publication date"
+for an archived file would silently encode a false date, not an
+approximate one. `get_short_interest_finra` now refuses to guess past
+that point: a settlement-to-publication gap over 45 days (confirmed real
+genuine gap is ~14 days) raises `DataUnavailableError` rather than
+returning data it can't stand behind.
+
 Run the real-data demos:
 
 ```bash

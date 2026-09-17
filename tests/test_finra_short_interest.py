@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from alt_data_pipeline.ingestion.finra_short_interest import get_short_interest_finra
+from alt_data_pipeline.ingestion.finra_short_interest import DataUnavailableError, get_short_interest_finra
 
 REAL_SETTLEMENT_DATE = "20260831"
 
@@ -69,3 +69,24 @@ def test_apple_short_interest_is_sane_real_value(real_data):
     assert aapl["exchange"] == "R"  # real, confirmed exchange code for this file
     assert aapl["current_short_interest"] > 100_000_000  # real scale for AAPL
     assert aapl["reported_pct_change"] == pytest.approx(20.13)
+
+
+def test_pre_migration_archived_file_raises_rather_than_lying():
+    # real, confirmed 2026-09-16: FINRA bulk-migrated its archive to this
+    # CDN on 2023-07-27 -- every pre-migration file's Last-Modified header
+    # reflects that migration, not its real original publication date.
+    # A real 2018 settlement file, checked directly: Last-Modified is
+    # literally 2023-07-27, ~1,914 days after its real settlement date --
+    # nowhere near the confirmed real ~14-day publication gap. Trusting it
+    # would silently encode a false publication date rather than an
+    # approximate one, so this must raise, not quietly return bad data.
+    with pytest.raises(DataUnavailableError):
+        get_short_interest_finra("20180430")
+
+
+def test_guard_still_allows_a_second_real_recent_file():
+    # confirms the guard isn't just permanently broken/over-firing --
+    # a different real recent date still works normally.
+    df = get_short_interest_finra("20260814")
+    gap_days = (df["publication_date"] - df["settlement_date"]).dt.days
+    assert (gap_days <= 45).all()
